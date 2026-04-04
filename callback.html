@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>認証中... — Project UNKNOWN</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d0d0f;--purple:#7f77dd;--purple-glow:#7f77dd33;--text:#e8e8f0;--text3:#555568;--red:#e24b4a;--red-bg:#1f0d0d}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;justify-content:center;position:relative}
+body::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 50% 40%,var(--purple-glow),transparent);pointer-events:none}
+.wrap{text-align:center;position:relative;z-index:1;padding:24px}
+.spinner{width:40px;height:40px;border:2px solid #7f77dd33;border-top-color:var(--purple);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.msg{font-size:13px;letter-spacing:1px;color:var(--text3)}
+.err{font-size:12px;color:var(--red);background:var(--red-bg);padding:12px 16px;border-radius:8px;margin-top:16px;display:none;max-width:360px;line-height:1.7;border:1px solid var(--red)}
+.err.show{display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="spinner" id="spinner"></div>
+  <div class="msg" id="msg">認証処理中...</div>
+  <div class="err" id="err"></div>
+</div>
+<script>
+const WORKER_URL = 'https://diction-service-backend.identificationofficial.workers.dev/';
+const REDIRECT_URI = 'https://diction-service.github.io/callback.html';
+
+async function handleCallback(){
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  const error = params.get('error');
+  if(error){showErr('X認証エラー: '+error);return;}
+  if(!code){showErr('認証コードが取得できませんでした。');return;}
+  const savedState = sessionStorage.getItem('oauth_state');
+  const codeVerifier = sessionStorage.getItem('pkce_verifier');
+  if(!savedState||state!==savedState){showErr('セキュリティエラー: もう一度ログインしてください。');return;}
+  setMsg('トークン取得中...');
+  try{
+    const tokenRes = await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'token',code,redirect_uri:REDIRECT_URI,code_verifier:codeVerifier})});
+    const tokenData = await tokenRes.json();
+    if(tokenData.error){showErr('トークン取得失敗: '+tokenData.error+'\n'+(tokenData.error_description||''));return;}
+    setMsg('ユーザー情報取得中...');
+    const userRes = await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'userinfo',access_token:tokenData.access_token})});
+    const userData = await userRes.json();
+    if(!userData.data){showErr('ユーザー情報の取得に失敗しました。');return;}
+    localStorage.setItem('x_user',JSON.stringify({id:userData.data.id,name:userData.data.name,username:userData.data.username,avatar:userData.data.profile_image_url||'',access_token:tokenData.access_token}));
+    sessionStorage.removeItem('pkce_verifier');
+    sessionStorage.removeItem('oauth_state');
+    setMsg('ログイン完了！');
+    setTimeout(()=>{location.href='./app.html';},800);
+  }catch(e){showErr('通信エラー: '+e.message);}
+}
+function setMsg(t){document.getElementById('msg').textContent=t;}
+function showErr(msg){document.getElementById('spinner').style.display='none';setMsg('認証失敗');const el=document.getElementById('err');el.textContent=msg;el.classList.add('show');setTimeout(()=>{location.href='./index.html';},5000);}
+handleCallback();
+</script>
+</body>
+</html>
