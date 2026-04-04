@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Project UNKNOWN — ARG</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
   --bg:#0d0d0f;--bg2:#131316;--bg3:#1a1a1e;--bg4:#222228;
@@ -30,17 +29,16 @@ body::before{content:'';position:absolute;inset:0;background:radial-gradient(ell
 @keyframes pulse-logo{0%,100%{box-shadow:0 0 20px var(--purple-glow),inset 0 0 20px var(--purple-glow)}50%{box-shadow:0 0 40px #7f77dd55,inset 0 0 40px #7f77dd22}}
 h1{font-family:var(--font-mono);font-size:20px;letter-spacing:2px;text-align:center}
 .sub{font-size:13px;color:var(--text2);text-align:center;line-height:1.8}
-.err{width:100%;padding:10px 14px;border-radius:var(--r);background:var(--red-bg);border:1px solid var(--red);color:var(--red);font-size:12px;font-family:var(--font-mono);display:none}
+.err{width:100%;padding:10px 14px;border-radius:var(--r);background:var(--red-bg);border:1px solid var(--red);color:var(--red);font-size:12px;font-family:var(--font-mono);display:none;line-height:1.6}
 .err.show{display:block}
-.x-btn{
-  width:100%;padding:13px 20px;border-radius:var(--rl);border:1px solid var(--border2);
-  display:flex;align-items:center;gap:12px;cursor:pointer;background:var(--bg3);
-  color:var(--text);font-size:14px;font-weight:500;font-family:var(--font-sans);
-  transition:all .2s;
-}
+.x-btn{width:100%;padding:13px 20px;border-radius:var(--rl);border:1px solid var(--border2);display:flex;align-items:center;gap:12px;cursor:pointer;background:var(--bg3);color:var(--text);font-size:14px;font-weight:500;font-family:var(--font-sans);transition:all .2s}
 .x-btn:hover{background:var(--bg4);border-color:var(--purple-dim)}
 .x-btn:disabled{opacity:.5;cursor:not-allowed}
 .xi{width:22px;height:22px;border-radius:4px;background:#fff;color:#000;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.spinner{width:16px;height:16px;border:2px solid #ffffff44;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.x-btn.loading .spinner{display:block}
+.x-btn.loading .xi{display:none}
 .divider{width:100%;display:flex;align-items:center;gap:12px;color:var(--text3);font-size:12px;font-family:var(--font-mono)}
 .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border)}
 .search-box{width:100%;border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;transition:border-color .2s}
@@ -68,10 +66,6 @@ h1{font-family:var(--font-mono);font-size:20px;letter-spacing:2px;text-align:cen
 .footer{font-size:11px;color:var(--text3);text-align:center;line-height:1.8;font-family:var(--font-mono)}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--bg4);color:var(--text);padding:10px 18px;border-radius:var(--rl);font-size:12px;opacity:0;transition:all .3s;border:1px solid var(--border2);font-family:var(--font-mono);z-index:99;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.spinner{width:16px;height:16px;border:2px solid #ffffff44;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;display:none}
-@keyframes spin{to{transform:rotate(360deg)}}
-.x-btn.loading .spinner{display:block}
-.x-btn.loading .xi{display:none}
 </style>
 </head>
 <body>
@@ -83,77 +77,79 @@ h1{font-family:var(--font-mono);font-size:20px;letter-spacing:2px;text-align:cen
     <h1>PROJECT UNKNOWN</h1>
     <p class="sub" style="margin-top:8px">謎が待っている。<br>ログインして、真実を探せ。</p>
   </div>
-
   <div class="err" id="err"></div>
-
   <button class="x-btn" id="login-btn" onclick="loginWithX()">
     <div class="xi">X</div>
     <div class="spinner"></div>
     X (Twitter) でログイン
   </button>
-
   <div class="divider">または</div>
-
   <div class="search-box">
     <input class="s-inp" id="search" placeholder="サーバーを検索（隠しサーバーも？）" oninput="doSearch(this.value)" autocomplete="off"/>
     <div class="results" id="results"></div>
   </div>
-
   <p class="footer">ARG参加者のみが隠しサーバーを発見できる<br>ヒント：暗号の中に名前がある</p>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
 // ============================================================
-// ★ ここだけ変更してください ★
-// Supabase ダッシュボード > Settings > API から取得
+// ★ X Developer Portal の OAuth 2.0 Client ID を入力
 // ============================================================
-const SUPABASE_URL = 'https://vvqwbstwwbllrqrnzoih.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2cXdic3R3d2JsbHJxcm56b2loIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTI0NDUsImV4cCI6MjA5MDUyODQ0NX0.tct-38v0GI_EUgan3ofCK5qSXOfkqcj7E9Y39MwH_kY';
+const CLIENT_ID = 'UC1nbHlETnRKbzJMQnJZdDQ1d0k6MTpjaQ';
+const REDIRECT_URI = 'https://diction-service.github.io/callback.html';
+const SCOPES = 'tweet.read users.read offline.access';
 // ============================================================
-
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // 既にログイン済みならappへ
-sb.auth.getSession().then(({data:{session}})=>{
-  if(session) location.href='./app.html';
-});
+if(localStorage.getItem('x_user')){
+  location.href = './app.html';
+}
 
-// OAuthコールバック処理（ハッシュにトークンが含まれる場合）
-sb.auth.onAuthStateChange((event,session)=>{
-  if(event==='SIGNED_IN' && session){
-    location.href='./app.html';
-  }
-});
+// PKCE ヘルパー
+function randomBase64(len){
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+async function sha256base64(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
 
 async function loginWithX(){
   const btn = document.getElementById('login-btn');
-  btn.disabled=true; btn.classList.add('loading');
-  const {error} = await sb.auth.signInWithOAuth({
-    provider:'twitter',
-    options:{
-      redirectTo: location.origin + location.pathname.replace('index.html','') + 'app.html'
-    }
+  btn.disabled = true; btn.classList.add('loading');
+  const verifier = randomBase64(32);
+  const challenge = await sha256base64(verifier);
+  const state = randomBase64(16);
+  sessionStorage.setItem('pkce_verifier', verifier);
+  sessionStorage.setItem('oauth_state', state);
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPES,
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
   });
-  if(error){
-    showErr(error.message);
-    btn.disabled=false; btn.classList.remove('loading');
-  }
+  location.href = 'https://twitter.com/i/oauth2/authorize?' + params;
 }
 
 const SERVERS=[
-  {name:'misskey.io',   desc:'メインサーバー・公開',      ic:'M',cls:'ic-t',b:'open',  s:false,kws:['misskey','io','メイン','公開']},
-  {name:'unknown.io',   desc:'招待制・謎の存在が管理',     ic:'?',cls:'ic-p',b:'hidden',s:true, kws:['unknown','謎','招待','layer2','cipher','project']},
-  {name:'shadow.layer', desc:'完全非公開・暗号解読者のみ',  ic:'S',cls:'ic-r',b:'locked',s:true, kws:['shadow','layer','暗号','decode','khoor','hello']},
-  {name:'agent.space',  desc:'調査員向けサーバー',          ic:'A',cls:'ic-g',b:'hidden',s:true, kws:['agent','調査','space']},
-  {name:'social.normal',desc:'一般公開サーバー',            ic:'N',cls:'ic-a',b:'open',  s:false,kws:['normal','social','一般']},
+  {name:'misskey.io',   desc:'メインサーバー・公開',     ic:'M',cls:'ic-t',b:'open',  s:false,kws:['misskey','io','メイン','公開']},
+  {name:'unknown.io',   desc:'招待制・謎の存在が管理',   ic:'?',cls:'ic-p',b:'hidden',s:true, kws:['unknown','謎','招待','layer2','cipher','project']},
+  {name:'shadow.layer', desc:'完全非公開・暗号解読者のみ',ic:'S',cls:'ic-r',b:'locked',s:true, kws:['shadow','layer','暗号','decode','khoor','hello']},
+  {name:'agent.space',  desc:'調査員向けサーバー',        ic:'A',cls:'ic-g',b:'hidden',s:true, kws:['agent','調査','space']},
+  {name:'social.normal',desc:'一般公開サーバー',           ic:'N',cls:'ic-a',b:'open',  s:false,kws:['normal','social','一般']},
 ];
 function doSearch(q){
   const el=document.getElementById('results');
   if(!q){el.style.display='none';return}
   const ql=q.toLowerCase();
   const hits=SERVERS.filter(s=>s.kws.some(k=>k.includes(ql))||s.name.includes(ql));
-  if(!hits.length){el.style.display='block';el.innerHTML='<div class="no-r">見つかりません — 別のキーワードを試して</div>';return}
+  if(!hits.length){el.style.display='block';el.innerHTML='<div class="no-r">見つかりません</div>';return}
   el.style.display='block';
   el.innerHTML=hits.map(s=>`
     <div class="s-item${s.s?' secret':''}" onclick="pick('${s.name}',${s.s})">
@@ -166,7 +162,6 @@ function pick(name,secret){
   if(secret) showToast('隠しサーバーを発見: '+name+' — Xでログインして参加');
   else loginWithX();
 }
-function showErr(msg){const el=document.getElementById('err');el.textContent=msg;el.classList.add('show')}
 let tt;
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2600)}
 </script>
