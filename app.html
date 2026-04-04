@@ -445,10 +445,11 @@ let allNotifs = [];
 // INIT
 // ============================================================
 async function init(){
-  const {data:{session}} = await sb.auth.getSession();
-  if(!session){ location.href='./index.html'; return; }
-  me = session.user;
-  myMeta = me.user_metadata || {};
+  const xUser = localStorage.getItem('x_user');
+  if(!xUser){ location.href='./index.html'; return; }
+  const parsed = JSON.parse(xUser);
+  me = { id: parsed.id, xUser: parsed };
+  myMeta = { full_name: parsed.name, user_name: parsed.username, avatar_url: parsed.avatar };
   renderUser();
   await Promise.all([loadPosts(), loadTriggers(), loadChannels(), loadClips(), loadDrive(), loadNotifs()]);
   renderFeed();
@@ -462,9 +463,9 @@ async function init(){
 function renderUser(){
   const av = document.getElementById('user-av');
   const cav = document.getElementById('compose-av');
-  const avatar = myMeta.avatar_url || myMeta.picture || '';
-  const name = myMeta.full_name || myMeta.name || myMeta.user_name || me.email || '?';
-  const handle = '@'+(myMeta.user_name||myMeta.preferred_username||'you')+'@x.com';
+  const avatar = myMeta.avatar_url || '';
+  const name = myMeta.full_name || '?';
+  const handle = '@'+(myMeta.user_name||'you')+'@x.com';
   if(avatar){
     av.innerHTML=`<img src="${avatar}" alt="">`;
     cav.innerHTML=`<img src="${avatar}" alt="">`;
@@ -476,7 +477,7 @@ function renderUser(){
 }
 
 async function logout(){
-  await sb.auth.signOut();
+  localStorage.removeItem('x_user');
   location.href='./index.html';
 }
 
