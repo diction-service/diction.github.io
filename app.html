@@ -314,6 +314,25 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-sans);background:va
         <div id="trig-chips"></div>
       </div>
       <div class="adm-section">
+        <div class="adm-label">チャンネルBotトリガー</div>
+        <div class="adm-row">
+          <select class="sm-sel" id="chtrig-ch">
+            <option value="general">general</option>
+            <option value="cipher">cipher</option>
+            <option value="coords">座標調査</option>
+            <option value="theories">考察</option>
+          </select>
+          <input class="sm-inp" id="chtrig-word" placeholder="トリガーワード"/>
+          <input class="sm-inp" id="chtrig-reply" style="flex:2" placeholder="Bot返信内容"/>
+          <select class="sm-sel" id="chtrig-actor">
+            <option value="0">謎の存在</option><option value="1">調査員A</option>
+            <option value="2">システム</option><option value="3">緊急放送</option>
+          </select>
+          <button class="sm-btn p" onclick="addChTrigger()">追加</button>
+        </div>
+        <div id="chtrig-chips"></div>
+      </div>
+      <div class="adm-section">
         <div class="adm-label">ARG投稿作成</div>
         <div class="adm-row">
           <select class="sm-sel" id="adm-actor">
@@ -465,13 +484,14 @@ async function init(){
   renderUser();
   await Promise.all([loadPosts(), loadTriggers(), loadChannels(), loadClips(), loadDrive(), loadNotifs()]);
   renderFeed();
-  renderClips();
+  renderLocalClips();
   renderDrive();
   renderChannelList();
   renderNotifs('all');
   setupRealtime();
   updateChBadge();
   checkHintVisibility();
+  chTriggers=getChTriggers();
 }
 
 function renderUser(){
@@ -499,8 +519,16 @@ async function logout(){
 // DATA LOADING
 // ============================================================
 async function loadPosts(){
-  // タイムラインは初期表示しない（ARG演出）
-  posts = [];
+  // ユーザー自身の投稿のみ取得（ARG演出でARGキャラの投稿は非表示）
+  const {data,error} = await sb.from('posts').select('*').eq('user_id',me.id).order('created_at',{ascending:true});
+  posts = data||[];
+  for(const p of posts){
+    const {data:reps} = await sb.from('replies').select('*').eq('post_id',p.id).order('created_at',{ascending:true});
+    p._replies = reps||[];
+    p._liked = false;
+    const lc = getLocalClips();
+    p._clipped = !!lc.find(c=>c.postId===p.id);
+  }
 }
 
 async function loadTriggers(){
@@ -570,6 +598,17 @@ document.querySelectorAll('.nav[data-panel]').forEach(nav=>{
     document.getElementById('panel-'+panel).classList.add('active');
     document.getElementById('right-col').style.display = panel==='timeline' ? '' : 'none';
     if(panel==='notif') markNotifsRead();
+    if(panel==='channels'){
+      // チャンネルバッジをリセット
+      const badge=document.getElementById('ch-badge');
+      if(badge){ badge.textContent=''; badge.className='unread-num'; }
+      localStorage.removeItem('ch_unread');
+    }
+    // タイムラインに戻るときshakeアニメーションをリセット
+    if(panel==='timeline'){
+      const feed=document.getElementById('tl-feed');
+      feed.style.animation='none';
+    }
   });
 });
 
@@ -652,7 +691,7 @@ function renderPost(p){
         <div class="reacts">${(p.reacts||[]).map(r=>`<span class="react" onclick="this.classList.toggle('on')">${r}</span>`).join('')}</div>
         <div class="acts">
           <span class="act" onclick="replyToPost(${p.id})">⟨ ${reps.length}</span>
-          <span class="act">↻ ${p.rp||0}</span>
+          <span class="act" onclick="renote(${p.id},this)">↻ ${p.rp||0}</span>
           <span class="act${p._liked?' liked':''}" id="like-act-${p.id}" onclick="toggleLike(${p.id},this)">♡ ${p.likes}</span>
           <span class="act${p._clipped?' clipped':''}" id="clip-act-${p.id}" onclick="toggleClip(${p.id},this)" title="クリップ">◆</span>
         </div>
@@ -674,6 +713,17 @@ function renderPost(p){
   </div>`;
 }
 
+function renote(id, el){
+  const p=posts.find(x=>x.id===id); if(!p)return;
+  const a=p.actor_idx>=0?ACTORS[p.actor_idx]:{name:p.user_name||'?',handle:p.user_handle||''};
+  openCompose();
+  document.getElementById('compose-text').value='RN: @'+(a.handle.split('@')[1]||a.name)+'
+「'+p.body.slice(0,60)+(p.body.length>60?'...':'')+'」
+';
+  p.rp=(p.rp||0)+1; el.textContent='↻ '+p.rp;
+  sb.from('posts').update({rp:p.rp}).eq('id',id).then(()=>{});
+}
+
 function esc(s){if(!s)return '';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}
 function relTime(ts){
   if(!ts)return 'たった今';
@@ -692,8 +742,11 @@ function closeCompose(){ document.getElementById('compose-area').classList.remov
 function toggleCW(){ cwVisible=!cwVisible; document.getElementById('cw-field').classList.toggle('show',cwVisible); }
 
 async function submitPost(){
-  const text = document.getElementById('compose-text').value.trim();
-  if(!text) return;
+  const cwText = document.getElementById('cw-field').value.trim();
+  const rawText = document.getElementById('compose-text').value.trim();
+  if(!rawText) return;
+  const text = cwText ? '[CW: '+cwText+']
+'+rawText : rawText;
   const btn = document.getElementById('post-submit-btn');
   btn.disabled=true;
   const name    = myMeta.full_name||myMeta.name||myMeta.user_name||me.email||'?';
@@ -718,19 +771,33 @@ async function submitPost(){
   const bodyLow = text.toLowerCase();
   const fired = triggers.filter(t=>bodyLow.includes(t.word.toLowerCase()));
   for(const t of fired){
-    await sb.from('replies').insert({post_id:newPost.id,actor_idx:t.actor_idx,body:t.reply,cipher:false,is_bot:true});
-    await sb.from('notifications').insert({user_id:me.id,type:'reply',actor_idx:t.actor_idx,actor_name:(ACTORS[t.actor_idx]||ACTORS[0]).name,body:(ACTORS[t.actor_idx]||ACTORS[0]).name+'がリプライ',sub:'「'+t.reply.slice(0,20)+'...」',post_id:newPost.id});
+    const repBody = {post_id:newPost.id,actor_idx:t.actor_idx,body:t.reply,cipher:false,is_bot:true,created_at:new Date().toISOString()};
+    // UIに即反映
+    if(!newPost._replies) newPost._replies=[];
+    newPost._replies.push(repBody);
+    // DBにも保存（失敗しても継続）
+    sb.from('replies').insert({post_id:newPost.id,actor_idx:t.actor_idx,body:t.reply,cipher:false,is_bot:true}).then(()=>{});
+    // 通知（Botからの通知のみ）
+    const actorName=(ACTORS[t.actor_idx]||ACTORS[0]).name;
+    allNotifs.unshift({id:Date.now(),type:'reply',actor_idx:t.actor_idx,actor_name:actorName,body:actorName+'がリプライ',sub:'「'+t.reply.slice(0,20)+'...」',is_read:false,created_at:new Date().toISOString()});
+    updateNotifBadge();
   }
   document.getElementById('compose-text').value=''; document.getElementById('cc').textContent='500';
   closeCompose(); renderFeed();
-  if(fired.length) showToast(ACTORS[fired[0].actorIdx]?.name+' からリプライが届いた'); else showToast('投稿しました');
+  if(fired.length) showToast((ACTORS[fired[0].actor_idx]||ACTORS[0]).name+' からリプライが届いた'); else showToast('投稿しました');
 }
 
 function replyToPost(id){
   const p = posts.find(x=>x.id===id); if(!p)return;
-  const a = p.actor_idx>=0 ? ACTORS[p.actor_idx] : {handle:'@?@?'};
+  let mention;
+  if(p.actor_idx>=0){
+    const a = ACTORS[p.actor_idx]||ACTORS[0];
+    mention = '@'+a.handle.split('@')[1];
+  } else {
+    mention = '@'+(p.user_handle||'').split('@')[1] || '@'+( p.user_name||'user');
+  }
   openCompose();
-  document.getElementById('compose-text').value='@'+a.handle.split('@')[1]+' ';
+  document.getElementById('compose-text').value=mention+' ';
 }
 
 // ============================================================
@@ -748,8 +815,11 @@ async function toggleLike(id, el){
     await sb.from('posts').update({likes:p.likes+1}).eq('id',id);
     p.likes++; p._liked=true;
     el.innerHTML=`♡ ${p.likes}`; el.classList.add('liked');
+    // ARGキャラの投稿へのいいねのみ通知（自分の投稿は除く）
     if(p.actor_idx>=0){
-      await sb.from('notifications').insert({user_id:me.id,type:'like',actor_idx:p.actor_idx,actor_name:ACTORS[p.actor_idx].name,body:'<strong>'+ACTORS[p.actor_idx].name+'</strong>の投稿にいいねしました',sub:'',post_id:id});
+      const actorName=ACTORS[p.actor_idx].name;
+      allNotifs.unshift({id:Date.now(),type:'like',actor_idx:p.actor_idx,actor_name:actorName,body:'<strong>'+actorName+'</strong>の投稿にいいねしました',sub:'',is_read:false,created_at:new Date().toISOString()});
+      updateNotifBadge();
     }
   }
 }
@@ -760,39 +830,54 @@ async function toggleLike(id, el){
 async function toggleClip(postId, el){
   const p = posts.find(x=>x.id===postId); if(!p)return;
   if(p._clipped){
-    await sb.from('clips').delete().eq('user_id',me.id).eq('post_id',postId);
+    sb.from('clips').delete().eq('user_id',me.id).eq('post_id',postId).then(()=>{});
     p._clipped=false; el.classList.remove('clipped');
+    removeLocalClip(postId);
     showToast('クリップを解除しました');
   } else {
-    await sb.from('clips').insert({user_id:me.id,post_id:postId});
+    sb.from('clips').insert({user_id:me.id,post_id:postId}).then(()=>{});
     p._clipped=true; el.classList.add('clipped');
+    saveLocalClip(p);
     showToast('クリップしました');
   }
-  await loadClips(); renderClips();
+  renderLocalClips();
 }
 
-function renderClips(){
-  const el = document.getElementById('clips-list');
+function getLocalClips(){ try{ return JSON.parse(localStorage.getItem('local_clips')||'[]'); }catch{ return []; } }
+function saveLocalClip(p){
+  const clips=getLocalClips();
+  if(!clips.find(c=>c.postId===p.id)){
+    clips.unshift({postId:p.id,body:p.body,actorIdx:p.actor_idx,userName:p.user_name,savedAt:new Date().toISOString()});
+    localStorage.setItem('local_clips',JSON.stringify(clips));
+  }
+}
+function removeLocalClip(postId){
+  const clips=getLocalClips().filter(c=>c.postId!==postId);
+  localStorage.setItem('local_clips',JSON.stringify(clips));
+}
+function renderLocalClips(){
+  const el=document.getElementById('clips-list');
+  const clips=getLocalClips();
   if(!clips.length){el.innerHTML='<div class="empty"><div class="empty-ic">◆</div>クリップした投稿がここに表示されます</div>';return}
-  el.innerHTML = clips.map(c=>{
-    const p = c.posts;
-    const a = p&&p.actor_idx>=0 ? ACTORS[p.actor_idx] : {name:p?.user_name||'?'};
+  el.innerHTML=clips.map(c=>{
+    const name=c.actorIdx>=0?(ACTORS[c.actorIdx]||{name:'?'}).name:(c.userName||'?');
     return `<div class="clip-item">
       <div class="clip-icon">◆</div>
       <div class="clip-body">
-        <div class="clip-source">${esc(a.name)} · ${p?relTime(p.created_at):''}</div>
-        <div class="clip-text">${esc(p?.body||'')}</div>
+        <div class="clip-source">${esc(name)} · ${relTime(c.savedAt)}</div>
+        <div class="clip-text">${esc(c.body||'')}</div>
       </div>
-      <button class="clip-del" onclick="deleteClip(${c.id},${p?.id})">✕</button>
+      <button class="clip-del" onclick="deleteLocalClip(${c.postId})">✕</button>
     </div>`;
   }).join('');
 }
-
-async function deleteClip(clipId, postId){
-  await sb.from('clips').delete().eq('id',clipId);
-  const p = posts.find(x=>x.id===postId); if(p) p._clipped=false;
-  await loadClips(); renderClips(); showToast('クリップを削除しました');
+function deleteLocalClip(postId){
+  removeLocalClip(postId);
+  const p=posts.find(x=>x.id===postId); if(p){ p._clipped=false; renderFeed(); }
+  renderLocalClips(); showToast('クリップを削除しました');
 }
+
+function renderClips(){ renderLocalClips(); }
 
 // ============================================================
 // DRIVE
@@ -802,9 +887,11 @@ function handleDriveFile(inp){
   const reader = new FileReader();
   reader.onload = async e=>{
     const content = e.target.result;
+    const localFile={id:Date.now(),name:file.name,content,size:content.length,created_at:new Date().toISOString()};
+    // DBに保存試みる（失敗してもローカルに追加）
     const {data,error} = await sb.from('drive_files').insert({user_id:me.id,name:file.name,content,size:content.length}).select().single();
-    if(error){showToast('アップロード失敗');return}
-    drive.unshift(data); renderDrive(); showToast(file.name+' をアップロードしました');
+    drive.unshift(error ? localFile : data);
+    renderDrive(); showToast(file.name+' をアップロードしました');
   };
   reader.readAsText(file); inp.value='';
 }
@@ -871,7 +958,7 @@ async function openChannel(id){
       <span style="font-size:12px;color:var(--text3);font-family:var(--font-mono)">${esc(ch?.description||'')}</span>
     </div>
     <div class="ch-msgs scroll-area" id="ch-msgs-${id}">
-      ${msgs.length===0?'<div class="empty"><div class="empty-ic">#</div>まだメッセージがありません</div>':msgs.map(renderChMsg).join('')}
+      ${msgs.map(renderChMsg).join('')}
     </div>
     <div class="ch-input-wrap">
       <input class="ch-inp" id="ch-inp-${id}" placeholder="# ${esc(ch?.name||id)} へ投稿..."
@@ -919,6 +1006,8 @@ async function sendMsg(id){
   sb.from('channel_messages').insert({channel_id:id,user_id:me.id,user_name:name,user_handle:handle,user_avatar:avatar,body}).then(({error})=>{
     if(error) console.warn('channel msg DB error:', error.message);
   });
+  // チャンネルBotトリガーチェック
+  checkChTriggers(id,body);
 }
 
 // ============================================================
@@ -962,6 +1051,16 @@ async function markNotifsRead(){
   updateNotifBadge(); renderNotifs(currentNotifFilter||'all');
 }
 
+function addChUnread(){
+  // チャンネルパネルが開いていない時だけバッジを増やす
+  const chPanel=document.getElementById('panel-channels');
+  if(chPanel.classList.contains('active')) return;
+  const cnt=(parseInt(localStorage.getItem('ch_unread'))||0)+1;
+  localStorage.setItem('ch_unread',cnt);
+  const badge=document.getElementById('ch-badge');
+  if(badge){ badge.textContent=cnt; badge.className='unread-num show'; }
+}
+
 // ============================================================
 // SEARCH
 // ============================================================
@@ -994,8 +1093,12 @@ async function addTrigger(){
   const reply=document.getElementById('trig-reply').value.trim();
   const actor_idx=parseInt(document.getElementById('trig-actor').value);
   if(!word||!reply)return;
-  const {data} = await sb.from('triggers').insert({word,reply,actor_idx}).select().single();
-  triggers.push(data);
+  const {data,error} = await sb.from('triggers').insert({word,reply,actor_idx}).select().single();
+  if(error){
+    triggers.push({id:Date.now(),word,reply,actor_idx});
+  } else {
+    triggers.push(data);
+  }
   document.getElementById('trig-word').value='';document.getElementById('trig-reply').value='';
   renderTriggerChips(); showToast('トリガーを追加: "'+word+'"');
 }
@@ -1012,11 +1115,68 @@ async function adminPost(){
   if(!body)return;
   const isCipher=type==='cipher', isAlert=type==='alert';
   const {data:p,error}=await sb.from('posts').insert({actor_idx,body,cipher:isCipher,is_alert:isAlert,likes:0,rp:0,reacts:[]}).select().single();
-  if(error){showToast('投稿に失敗');return}
-  p._replies=[]; p._liked=false; p._clipped=false;
-  posts.push(p);
-  await sb.from('notifications').insert({user_id:me.id,type:'system',actor_idx,actor_name:(ACTORS[actor_idx]||ACTORS[0]).name,body:'<strong>'+(ACTORS[actor_idx]||ACTORS[0]).name+'</strong>が新しい投稿',sub:'「'+body.slice(0,20)+'...」',post_id:p.id});
+  let newPost;
+  if(error){
+    newPost={id:Date.now(),actor_idx,body,cipher:isCipher,is_alert:isAlert,likes:0,rp:0,reacts:[],created_at:new Date().toISOString(),_replies:[],_liked:false,_clipped:false};
+  } else {
+    newPost=p; newPost._replies=[]; newPost._liked=false; newPost._clipped=false;
+  }
+  posts.push(newPost);
   document.getElementById('adm-body').value=''; renderFeed(); showToast('ARG投稿を作成しました');
+}
+
+// ============================================================
+// CHANNEL BOT TRIGGERS
+// ============================================================
+let chTriggers = [];
+
+function getChTriggers(){ return JSON.parse(localStorage.getItem('ch_triggers')||'[]'); }
+function saveChTriggers(){ localStorage.setItem('ch_triggers',JSON.stringify(chTriggers)); }
+
+function addChTrigger(){
+  const ch=document.getElementById('chtrig-ch').value;
+  const word=document.getElementById('chtrig-word').value.trim();
+  const reply=document.getElementById('chtrig-reply').value.trim();
+  const actor_idx=parseInt(document.getElementById('chtrig-actor').value);
+  if(!word||!reply)return;
+  chTriggers.push({id:Date.now(),ch,word,reply,actor_idx});
+  saveChTriggers();
+  document.getElementById('chtrig-word').value='';
+  document.getElementById('chtrig-reply').value='';
+  renderChTriggerChips();
+  showToast('チャンネルトリガーを追加: "'+word+'"');
+}
+
+function renderChTriggerChips(){
+  const el=document.getElementById('chtrig-chips');
+  if(!el)return;
+  el.innerHTML=chTriggers.map(t=>`
+    <span class="chip">#${t.ch} "${esc(t.word)}" → ${esc((ACTORS[t.actor_idx]||ACTORS[0]).t)} <span class="x" onclick="delChTrigger(${t.id})">✕</span></span>`).join('');
+}
+
+function delChTrigger(id){
+  chTriggers=chTriggers.filter(t=>t.id!==id);
+  saveChTriggers(); renderChTriggerChips();
+}
+
+function checkChTriggers(channelId, body){
+  const matched=chTriggers.filter(t=>t.ch===channelId&&body.toLowerCase().includes(t.word.toLowerCase()));
+  matched.forEach(t=>{
+    const a=ACTORS[t.actor_idx]||ACTORS[0];
+    const botMsg={id:Date.now()+Math.random(),channel_id:channelId,user_id:'bot',user_name:a.name,user_handle:a.handle,user_avatar:null,body:t.reply,created_at:new Date().toISOString(),_bot:true,actor_idx:t.actor_idx};
+    setTimeout(()=>{
+      const msgsEl=document.getElementById('ch-msgs-'+channelId);
+      if(msgsEl){
+        const div=document.createElement('div');
+        div.innerHTML=renderChMsg(botMsg);
+        msgsEl.appendChild(div.firstElementChild);
+        msgsEl.scrollTop=msgsEl.scrollHeight;
+      }
+      // チャンネルBotのみ通知
+      addChUnread();
+      sb.from('channel_messages').insert({channel_id:channelId,user_id:null,user_name:a.name,user_handle:a.handle,user_avatar:null,body:t.reply}).then(()=>{});
+    },1000);
+  });
 }
 
 // ============================================================
