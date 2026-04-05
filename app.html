@@ -1227,7 +1227,7 @@ function srvSearch(q){
   const hits=SERVERS.filter(s=>s.kws.some(k=>k.includes(ql))||s.name.includes(ql));
   if(!hits.length){el.innerHTML='';return}
   el.innerHTML=hits.map(s=>`
-    <div class="srv-hit" onclick="window.open('./server-${s.name.replace('.','')}.html','_blank')">
+    <div class="srv-hit" onclick="window.open('./join-${s.name.replace('.','')}.html','_blank')">
       <div class="ic-sm ${s.cls}">${s.ic}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:12px;font-weight:500;font-family:var(--font-mono)">${s.name}${s.s?' 🔒':''}</div>
