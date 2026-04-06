@@ -181,7 +181,6 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-sans);background:va
 .search-bar input::placeholder{color:var(--text3)}
 
 /* ===== ADMIN ===== */
-.admin-bar{display:none;border-top:1px solid var(--border);background:var(--bg2);overflow-y:auto;max-height:45vh;flex-shrink:0}
 .adm-inner{padding:14px 16px}
 .adm-section{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)}
 .adm-section:last-child{border-bottom:none;margin-bottom:0}
@@ -270,7 +269,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-sans);background:va
   <div class="nav" data-panel="drive"><span class="nav-ic">☁</span>ドライブ</div>
   <div class="nav" data-panel="channels"><span class="nav-ic">■</span>チャンネル<span id="ch-badge" class="unread-num"></span></div>
   <div class="nav" data-panel="search"><span class="nav-ic">○</span>検索</div>
-  <div class="nav" id="nav-admin"><span class="nav-ic">⚙</span>管理者</div>
+
   <button class="note-btn" onclick="openCompose()">ノート</button>
   <div class="user-row">
     <div class="u-av" id="user-av"></div>
@@ -319,59 +318,6 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-sans);background:va
     <button class="notice-close" onclick="this.parentElement.style.display='none'">✕</button>
   </div>
   <div class="scroll-area" id="tl-feed"></div>
-  <div class="admin-bar" id="admin-bar">
-    <div class="adm-inner">
-      <div class="adm-section">
-        <div class="adm-label">Botトリガー設定</div>
-        <div class="adm-row">
-          <input class="sm-inp" id="trig-word" placeholder="トリガーワード"/>
-          <input class="sm-inp" id="trig-reply" style="flex:2" placeholder="Bot返信内容"/>
-          <select class="sm-sel" id="trig-actor">
-            <option value="0">謎の存在</option><option value="1">調査員A</option>
-            <option value="2">システム</option><option value="3">緊急放送</option>
-          </select>
-          <button class="sm-btn p" onclick="addTrigger()">追加</button>
-        </div>
-        <div id="trig-chips"></div>
-      </div>
-      <div class="adm-section">
-        <div class="adm-label">チャンネルBotトリガー</div>
-        <div class="adm-row">
-          <select class="sm-sel" id="chtrig-ch">
-            <option value="general">general</option>
-            <option value="cipher">cipher</option>
-            <option value="coords">座標調査</option>
-            <option value="theories">考察</option>
-          </select>
-          <input class="sm-inp" id="chtrig-word" placeholder="トリガーワード"/>
-          <input class="sm-inp" id="chtrig-reply" style="flex:2" placeholder="Bot返信内容"/>
-          <select class="sm-sel" id="chtrig-actor">
-            <option value="0">謎の存在</option><option value="1">調査員A</option>
-            <option value="2">システム</option><option value="3">緊急放送</option>
-          </select>
-          <button class="sm-btn p" onclick="addChTrigger()">追加</button>
-        </div>
-        <div id="chtrig-chips"></div>
-      </div>
-      <div class="adm-section">
-        <div class="adm-label">ARG投稿作成</div>
-        <div class="adm-row">
-          <select class="sm-sel" id="adm-actor">
-            <option value="0">謎の存在</option><option value="1">調査員A</option>
-            <option value="2">システム</option><option value="3">緊急放送</option>
-          </select>
-          <select class="sm-sel" id="adm-type">
-            <option value="normal">通常</option><option value="cipher">暗号</option><option value="alert">緊急</option>
-          </select>
-        </div>
-        <div class="adm-row">
-          <textarea class="sm-ta" id="adm-body" placeholder="投稿内容..."></textarea>
-        </div>
-        <button class="sm-btn p" onclick="adminPost()">ARG投稿</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- NOTIFICATIONS -->
 <div class="panel" id="panel-notif">
@@ -576,6 +522,19 @@ async function loadPosts(){
     p._liked = false;
     p._clipped = !!lc.find(c=>c.postId===p.id);
   }
+  // シナリオ投稿を先頭に追加（SCENARIO_POSTSで定義したもの）
+  const scenarioPosts = SCENARIO_POSTS.map(sp=>({
+    ...sp,
+    user_id: null,
+    user_name: null,
+    likes: 0, rp: 0, reacts: [],
+    created_at: new Date(0).toISOString(), // 最古にして先頭に
+    _replies: [], _liked: false, _clipped: false,
+  }));
+  // 重複しないよう既存のsp_idと照合
+  const existingIds = new Set(posts.map(p=>String(p.id)));
+  const newScenario = scenarioPosts.filter(sp=>!existingIds.has(String(sp.id)));
+  posts = [...newScenario, ...posts];
 }
 
 function pageKey(){ return 'posts_'+location.pathname.split('/').pop().replace('.html',''); }
@@ -592,9 +551,103 @@ function saveLocalPost(p){
 }
 
 async function loadTriggers(){
-  const {data} = await sb.from('triggers').select('*').order('id');
-  triggers = data||[];
+  // ========================================================
+  // ★★★ shadow.layer サーバー専用トリガー設定 ★★★
+  //
+  // 【返信トリガー】
+  // ノートに特定のワードが含まれていたとき、Botが返信する
+  //
+  // 書き方：
+  // { word:'検知するワード', reply:'Botの返信文', actor_idx: 番号 }
+  //
+  // actor_idx の番号：
+  //   0 = 謎の存在  1 = 調査員A  2 = システム  3 = 緊急放送
+  //
+  // 例を参考に自由に追加・削除してください
+  // ========================================================
+  triggers = [
+
+    // --- ここから追加・編集してください ---
+
+    {
+      id: 1,
+      word: '暗号',
+      reply: '...お前も気づいたか。ROT3を試せ。',
+      actor_idx: 0
+    },
+    {
+      id: 2,
+      word: 'HELLO WORLD',
+      reply: '正しい。鍵の第二層へ進め。次の座標を確認せよ：35.6762, 139.6503',
+      actor_idx: 0
+    },
+    {
+      id: 3,
+      word: 'layer2',
+      reply: '正しい。次の扉はさらに深い場所にある。',
+      actor_idx: 2
+    },
+    {
+      id: 4,
+      word: 'shadow',
+      reply: '...見つけたか。だがここに入るには、まだ足りないものがある。',
+      actor_idx: 0
+    },
+    {
+      id: 5,
+      word: 'void',
+      reply: '...存在しないはずのものを見た。それは正しい疑問だ。',
+      actor_idx: 0
+    },
+
+    // --- ここまで ---
+    // 新しいトリガーを追加する場合はこの行の上に書いてください
+    // { id: 6, word: '新しいワード', reply: '返信内容', actor_idx: 0 },
+
+  ];
 }
+
+// ========================================================
+// ★★★ 案内投稿設定 ★★★
+//
+// ログイン直後にタイムラインに自動表示されるARGキャラの投稿
+// ここを編集することでシナリオを進められます
+//
+// actor_idx: 0=謎の存在 1=調査員A 2=システム 3=緊急放送
+// cipher: true にすると暗号スタイルで表示される
+// is_alert: true にすると緊急アラートスタイルになる
+// ========================================================
+const SCENARIO_POSTS = [
+
+  // --- ここから追加・編集してください ---
+
+  {
+    id: 'sp_001',
+    actor_idx: 0,
+    body: 'KHOOR ZRUOG\n\n最初の鍵を見つけよ。',
+    cipher: true,
+    is_alert: false,
+  },
+  {
+    id: 'sp_002',
+    actor_idx: 2,
+    body: '⚠ システム警告\n01001100 01000001 01011001 01000101 01010010 00110010',
+    cipher: true,
+    is_alert: false,
+  },
+  {
+    id: 'sp_003',
+    actor_idx: 3,
+    body: '【緊急】第二フェーズが開始されました。\n次のメッセージを待て。時間は限られている。',
+    cipher: false,
+    is_alert: true,
+  },
+
+  // --- ここまで ---
+  // 新しい案内投稿を追加する場合はこの行の上に書いてください
+  // { id: 'sp_004', actor_idx: 0, body: '投稿内容', cipher: false, is_alert: false },
+
+];
 
 async function loadChannels(){
   const {data} = await sb.from('channels').select('*').order('pinned',{ascending:false});
@@ -672,20 +725,6 @@ document.querySelectorAll('.nav[data-panel]').forEach(nav=>{
   });
 });
 
-document.getElementById('nav-admin').addEventListener('click',()=>{
-  const bar = document.getElementById('admin-bar');
-  if(bar.style.display==='block'){
-    bar.style.display='none'; return;
-  }
-  const pw = prompt('管理者パスワードを入力してください:');
-  if(pw !== '0601'){ showToast('パスワードが違います'); return; }
-  document.querySelectorAll('.nav').forEach(n=>n.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-timeline').classList.add('active');
-  document.getElementById('right-col').style.display='';
-  bar.style.display='block';
-  renderTriggerChips();
-});
 
 function switchTab(el){
   el.parentElement.querySelectorAll('.tl-tab').forEach(t=>t.classList.remove('active'));
