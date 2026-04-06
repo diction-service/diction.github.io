@@ -62,6 +62,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-sans);background:va
 .tl-tab:hover{color:var(--text2)}
 .tl-tab.active{color:var(--purple);border-bottom-color:var(--purple);font-weight:500}
 .scroll-area{overflow-y:auto;flex:1}
+@media(max-width:768px){.scroll-area{padding-bottom:70px}}
 
 /* ===== COMPOSE ===== */
 .compose-wrap{display:none;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -228,6 +229,26 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-sans);background:va
 .empty{padding:40px 16px;text-align:center;color:var(--text3);font-family:var(--font-mono);font-size:13px;line-height:1.8}
 .empty-ic{font-size:32px;margin-bottom:12px;opacity:.4}
 @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}
+@media(max-width:768px){
+  .sidebar{display:none}
+  .right-col{display:none!important}
+  .app{flex-direction:column}
+  .panel{border-right:none}
+  .mob-nav{display:flex!important}
+  .panel-hd h2{font-size:13px}
+  .post{padding:10px 12px}
+  .av{width:32px;height:32px;font-size:12px}
+  .p-name{font-size:12px}
+  .p-body{font-size:12px}
+  .acts{gap:12px}
+  .compose-wrap{padding:8px 10px}
+  .ch-sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border);max-height:160px}
+  .ch-list-area{padding:6px}
+  .ch-item{padding:6px 10px;margin-bottom:4px}
+  .adm-row{flex-direction:column}
+  .sm-inp,.sm-ta,.sm-sel{width:100%}
+  .panel#panel-channels{flex-direction:column}
+}
 .access-denied-msg{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:9999;pointer-events:none;opacity:0;transition:opacity .3s}
 .access-denied-msg.show{opacity:1}
 .ad-inner{background:#1f0d0d;border:1px solid var(--red);border-radius:var(--rl);padding:20px 32px;display:flex;align-items:center;gap:12px;font-family:var(--font-mono);font-size:16px;color:var(--red);box-shadow:0 0 40px #e24b4a33}
@@ -439,6 +460,25 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-sans);background:va
 </div>
 <div class="toast" id="toast"></div>
 
+<!-- スマホ用下部ナビ -->
+<div class="mob-nav" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);z-index:100;justify-content:space-around;padding:6px 0 10px">
+  <button onclick="mobNav('timeline')" style="background:none;border:none;color:var(--text2);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-family:var(--font-mono);padding:4px 8px">
+    <span style="font-size:18px">≡</span>TL
+  </button>
+  <button onclick="mobNav('notif')" style="background:none;border:none;color:var(--text2);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-family:var(--font-mono);padding:4px 8px">
+    <span style="font-size:18px">♡</span>通知
+  </button>
+  <button onclick="openCompose()" style="background:var(--purple-dim);border:none;color:#fff;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-family:var(--font-mono);padding:6px 16px;border-radius:20px;margin:0 4px">
+    <span style="font-size:16px">+</span>
+  </button>
+  <button onclick="mobNav('channels')" style="background:none;border:none;color:var(--text2);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-family:var(--font-mono);padding:4px 8px">
+    <span style="font-size:18px">■</span>CH
+  </button>
+  <button onclick="mobNav('search')" style="background:none;border:none;color:var(--text2);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-family:var(--font-mono);padding:4px 8px">
+    <span style="font-size:18px">○</span>検索
+  </button>
+</div>
+
 <script>
 // ============================================================
 // ★ ここだけ変更してください（index.htmlと同じ値）★
@@ -538,16 +578,16 @@ async function loadPosts(){
   }
 }
 
+function pageKey(){ return 'posts_'+location.pathname.split('/').pop().replace('.html',''); }
 function getLocalSavedPosts(){
-  try{ return JSON.parse(localStorage.getItem('local_posts')||'[]'); }catch{ return []; }
+  try{ return JSON.parse(localStorage.getItem(pageKey())||'[]'); }catch{ return []; }
 }
 function saveLocalPost(p){
   const saved = getLocalSavedPosts();
   if(!saved.find(x=>String(x.id)===String(p.id))){
-    // _replies等の内部プロパティは保存しない
     const toSave={id:p.id,actor_idx:p.actor_idx,user_id:p.user_id,user_name:p.user_name,user_handle:p.user_handle,user_avatar:p.user_avatar,body:p.body,cipher:p.cipher,likes:p.likes,rp:p.rp,reacts:p.reacts,is_alert:p.is_alert,created_at:p.created_at};
     saved.push(toSave);
-    localStorage.setItem('local_posts',JSON.stringify(saved));
+    localStorage.setItem(pageKey(),JSON.stringify(saved));
   }
 }
 
@@ -965,14 +1005,14 @@ function joinChannel(chId){
   renderChannelList();
 }
 
-function getLocalChMsgs(id){ try{ return JSON.parse(localStorage.getItem('ch_msgs_'+id)||'[]'); }catch{ return []; } }
+function chMsgKey(id){ return 'ch_msgs_'+location.pathname.split('/').pop().replace('.html','')+'_'+id; }
+function getLocalChMsgs(id){ try{ return JSON.parse(localStorage.getItem(chMsgKey(id))||'[]'); }catch{ return []; } }
 function saveLocalChMsg(id,msg){
   const msgs=getLocalChMsgs(id);
   if(!msgs.find(m=>String(m.id)===String(msg.id))){
-    msgs.push({id:msg.id,user_name:msg.user_name,user_handle:msg.user_handle,user_avatar:msg.user_avatar,body:msg.body,created_at:msg.created_at});
-    // 最新200件のみ保持
+    msgs.push({id:msg.id,user_name:msg.user_name,user_handle:msg.user_handle,user_avatar:msg.user_avatar,body:msg.body,created_at:msg.created_at,actor_idx:msg.actor_idx!=null?msg.actor_idx:undefined});
     if(msgs.length>200) msgs.splice(0,msgs.length-200);
-    localStorage.setItem('ch_msgs_'+id,JSON.stringify(msgs));
+    localStorage.setItem(chMsgKey(id),JSON.stringify(msgs));
   }
 }
 
@@ -1160,6 +1200,7 @@ async function adminPost(){
     newPost=p; newPost._replies=[]; newPost._liked=false; newPost._clipped=false;
   }
   posts.push(newPost);
+  saveLocalPost(newPost);
   document.getElementById('adm-body').value=''; renderFeed(); showToast('ARG投稿を作成しました');
 }
 
@@ -1210,6 +1251,8 @@ function checkChTriggers(channelId, body){
         msgsEl.appendChild(div.firstElementChild);
         msgsEl.scrollTop=msgsEl.scrollHeight;
       }
+      // localStorageにも保存（リロード後も残る）
+      saveLocalChMsg(channelId, botMsg);
       // チャンネルBotのみ通知
       addChUnread();
       sb.from('channel_messages').insert({channel_id:channelId,user_id:null,user_name:a.name,user_handle:a.handle,user_avatar:null,body:t.reply}).then(()=>{});
@@ -1227,7 +1270,7 @@ function srvSearch(q){
   const hits=SERVERS.filter(s=>s.kws.some(k=>k.includes(ql))||s.name.includes(ql));
   if(!hits.length){el.innerHTML='';return}
   el.innerHTML=hits.map(s=>`
-    <div class="srv-hit" onclick="window.open('./join-${s.name.replace('.','')}.html','_blank')">
+    <div class="srv-hit" onclick="window.open('./server-${s.name.replace('.','')}.html','_blank')">
       <div class="ic-sm ${s.cls}">${s.ic}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:12px;font-weight:500;font-family:var(--font-mono)">${s.name}${s.s?' 🔒':''}</div>
@@ -1282,6 +1325,17 @@ function checkHintVisibility(){
 // ============================================================
 // TOAST
 // ============================================================
+function mobNav(panel){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+panel).classList.add('active');
+  if(panel==='notif') markNotifsRead();
+  if(panel==='channels'){
+    localStorage.removeItem('ch_unread');
+    const badge=document.getElementById('ch-badge');
+    if(badge){ badge.textContent=''; badge.className='unread-num'; }
+  }
+}
+
 let tt;
 function showToast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
